@@ -53,7 +53,7 @@ fn add_line_to_boards(
 
 fn play((numbers, mut boards): (Vec<isize>, Vec<BingoBoard>)) -> isize {
     for number in numbers {
-        for mut board in &mut boards {
+        for board in &mut boards {
             board.mark_value(number);
             if board.bingo() {
                 return number * board.compute_unmarked_score();
