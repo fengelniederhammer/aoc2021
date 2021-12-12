@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::fs::read_to_string;
 
-use crate::day9::Direction::{Down, Left, Right, Up};
-use crate::day9::InnerState::{Inner, NoneYet};
 use nalgebra::{DMatrix, RowDVector};
+
+use crate::day9::Direction::{Down, Left, Right, Up};
 
 pub fn get_answer_1() -> usize {
     sum_low_point_risk(read_file("src/day9/input.txt"))
@@ -110,6 +110,59 @@ impl BasinIterator {
             already_covered: vec![],
         }
     }
+
+    fn should_skip_point(&self, point: &Point) -> bool {
+        matches!(self.matrix.get(point), None | Some(9)) || self.already_covered.contains(point)
+    }
+
+    fn get_next_inner_iterator(&self, next: Point) -> InnerState {
+        InnerState::Inner(Box::from(BasinIterator {
+            matrix: self.matrix.clone(),
+            origin: next,
+            directions_to_cover: vec![Up, Left, Down, Right],
+            inner: InnerState::NoneYet,
+            already_covered: self.already_covered.clone(),
+        }))
+    }
+
+    fn handle_origin(&mut self) -> Option<Point> {
+        match self.directions_to_cover.pop() {
+            None => {
+                self.already_covered.push(self.origin);
+                self.inner = InnerState::NoneLeft;
+            }
+            Some(next_direction) => {
+                let next = next_direction.get_moved_point(self.origin);
+
+                if self.should_skip_point(&next) {
+                    return self.next();
+                }
+
+                self.already_covered.push(self.origin);
+                self.inner = self.get_next_inner_iterator(next);
+            }
+        };
+        Some(self.origin)
+    }
+
+    fn handle_inner_iter_next(&mut self, next: Option<Point>) -> Option<Point> {
+        match next {
+            Some(_) => next,
+            None => match self.directions_to_cover.pop() {
+                None => None,
+                Some(next_direction) => {
+                    let next = next_direction.get_moved_point(self.origin);
+
+                    if self.should_skip_point(&next) {
+                        return self.next();
+                    }
+
+                    self.inner = self.get_next_inner_iterator(next);
+                    self.next()
+                }
+            },
+        }
+    }
 }
 
 impl Iterator for BasinIterator {
@@ -117,90 +170,19 @@ impl Iterator for BasinIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.inner {
-            NoneYet => {
-                let (i, j) = self.origin;
-
-                let next_direction = match self.directions_to_cover.pop() {
-                    None => {
-                        self.already_covered.push(self.origin);
-
-                        self.inner = InnerState::NoneLeft;
-                        return Some(self.origin);
-                    }
-                    Some(next_direction) => next_direction,
-                };
-                let next = match next_direction {
-                    Up => (i, j + 1),
-                    Left => (i - 1, j),
-                    Down => (i, j - 1),
-                    Right => (i + 1, j),
-                };
-
-                if matches!(self.matrix.get(&next), None | Some(9))
-                    || self.already_covered.contains(&next)
-                {
-                    return self.next();
-                }
-
-                self.already_covered.push(self.origin);
-
-                self.inner = Inner(Box::from(BasinIterator {
-                    matrix: self.matrix.clone(),
-                    origin: next,
-                    directions_to_cover: vec![Up, Left, Down, Right],
-                    inner: NoneYet,
-                    already_covered: self.already_covered.clone(),
-                }));
-                Some(self.origin)
-            }
-            Inner(inner) => match inner.next() {
-                None => {
-                    for point in &inner.already_covered {
-                        if !self.already_covered.contains(&point) {
-                            self.already_covered.push(point.clone());
-                        }
-                    }
-
-                    match self.directions_to_cover.pop() {
-                        None => None,
-                        Some(next_direction) => {
-                            let (i, j) = self.origin;
-
-                            let next = match next_direction {
-                                Up => (i, j + 1),
-                                Left => (i - 1, j),
-                                Down => (i, j - 1),
-                                Right => (i + 1, j),
-                            };
-
-                            if matches!(self.matrix.get(&next), None | Some(9))
-                                || self.already_covered.contains(&next)
-                            {
-                                return self.next();
-                            }
-
-                            self.inner = Inner(Box::from(BasinIterator {
-                                matrix: self.matrix.clone(),
-                                origin: next,
-                                directions_to_cover: vec![Up, Left, Down, Right],
-                                inner: NoneYet,
-                                already_covered: self.already_covered.clone(),
-                            }));
-                            self.next()
-                        }
-                    }
-                }
-                some => {
-                    for point in &inner.already_covered {
-                        if !self.already_covered.contains(&point) {
-                            self.already_covered.push(point.clone());
-                        }
-                    }
-
-                    some
-                }
-            },
+            InnerState::NoneYet => self.handle_origin(),
             InnerState::NoneLeft => None,
+            InnerState::Inner(inner) => {
+                let next = inner.next();
+
+                for point in &inner.already_covered {
+                    if !self.already_covered.contains(&point) {
+                        self.already_covered.push(point.clone());
+                    }
+                }
+
+                self.handle_inner_iter_next(next)
+            }
         }
     }
 }
@@ -218,6 +200,17 @@ enum Direction {
     Left,
     Down,
     Right,
+}
+
+impl Direction {
+    fn get_moved_point(&self, (i, j): Point) -> Point {
+        match self {
+            Up => (i, j + 1),
+            Left => (i - 1, j),
+            Down => (i, j - 1),
+            Right => (i + 1, j),
+        }
+    }
 }
 
 #[cfg(test)]
